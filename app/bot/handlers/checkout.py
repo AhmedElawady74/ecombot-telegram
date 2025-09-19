@@ -1,4 +1,5 @@
 import re
+from html import escape
 from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -11,6 +12,17 @@ from app.core.config import ADMIN_IDS
 router = Router()
 
 _phone_re = re.compile(r"^[+0-9][0-9\s\-()]{5,}$")
+
+def _build_user_mention(u: types.User) -> str:
+    """
+    Return a clickable mention:
+    - @username if available
+    - else HTML link via tg://user?id=... with display as full_name or ID
+    """
+    if u.username:
+        return f"@{u.username}"
+    display = (u.full_name or str(u.id)).strip()
+    return f'<a href="tg://user?id={u.id}">{escape(display)}</a>'
 
 @router.callback_query(F.data == "checkout")
 async def start_checkout(cb: types.CallbackQuery, state: FSMContext):
@@ -90,15 +102,16 @@ async def finalize(cb: types.CallbackQuery, state: FSMContext):
         f"✅ Order placed!\nOrder № {order.order_number}\nTotal: ${float(order.total):.2f}"
     )
 
-    # notify admins
+    # notify admins — use robust mention
     ship = data.get("shipping", "—")
+    user_mention = _build_user_mention(cb.from_user)
     if ADMIN_IDS:
         for admin_id in ADMIN_IDS:
             try:
                 await cb.bot.send_message(
                     admin_id,
                     f"🆕 New order {order.order_number}\n"
-                    f"User: @{cb.from_user.username or cb.from_user.id}\n"
+                    f"User: {user_mention}\n"
                     f"Shipping: {ship}\n"
                     f"Total: ${float(order.total):.2f}\nStatus: {order.status}"
                 )

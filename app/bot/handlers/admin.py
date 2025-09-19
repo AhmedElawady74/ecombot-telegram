@@ -1,10 +1,13 @@
 import csv
 import io
+import logging
 from html import escape
+
 from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import ADMIN_IDS
 from app.db.base import SessionLocal
@@ -20,6 +23,7 @@ from app.bot.keyboards.admin import (
 from app.bot.states.admin_product import NewProduct, SetPhoto, EditProduct
 
 router = Router()
+log = logging.getLogger("ecombot.admin")
 
 def _is_admin(uid: int) -> bool:
     return uid in ADMIN_IDS
@@ -103,7 +107,6 @@ async def adm_edit_field_save(message: types.Message, state: FSMContext):
     value_raw = message.text.strip()
 
     async with SessionLocal() as db:
-        # validate per-field
         if field == "name":
             if len(value_raw) < 2:
                 await message.answer("Name too short."); return
@@ -138,17 +141,26 @@ async def adm_edit_field_save(message: types.Message, state: FSMContext):
     text = f"Updated:\n#{p.id} {p.name}\nPrice: ${float(p.price):.2f}\nCategory: {cat.name}\n\n{p.description or '—'}"
     await message.answer(text, reply_markup=product_actions_kb(p.id))
 
-# ---------- delete product ----------
+# ---------- delete product (FK-safe) ----------
 @router.callback_query(F.data.startswith("adm:del:"))
 async def adm_product_delete(cb: types.CallbackQuery):
     if not _is_admin(cb.from_user.id):
         await cb.answer(); return
     pid = int(cb.data.split(":")[2])
+
     async with SessionLocal() as db:
-        await repo.delete_product(db, pid)
+        try:
+            await repo.delete_product(db, pid)  # hard delete
+            info = "Deleted."
+        except IntegrityError as e:
+            log.warning("Hard delete failed due to FK, marking inactive. pid=%s err=%s", pid, e)
+            # soft delete instead
+            await repo.update_product_fields(db, pid, is_active=False)
+            info = "Product is linked to orders. Marked as inactive instead."
         products = await repo.list_products(db)
-    await cb.message.edit_text("Deleted. Products:", reply_markup=products_kb(products))
-    await cb.answer("Removed")
+
+    await cb.message.edit_text(f"{info}\nProducts:", reply_markup=products_kb(products))
+    await cb.answer("Done")
 
 # ---------- add product (FSM) ----------
 @router.callback_query(F.data == "adm:add")
@@ -303,7 +315,6 @@ async def adm_order_view(cb: types.CallbackQuery):
     else:
         lines.append("—")
 
-    # user mention
     if user:
         mention = f'<a href="tg://user?id={user.tg_id}">{escape(user.name or str(user.tg_id))}</a>'
         lines.insert(1, f"User: {mention}")
@@ -321,10 +332,8 @@ async def adm_order_set_status(cb: types.CallbackQuery):
         order = await repo.set_order_status(db, oid, status)
         if not order:
             await cb.answer("Order not found", show_alert=True); return
-        # load user to notify
         _, _, user = await repo.get_order_with_items(db, oid)
 
-    # notify user
     if user:
         try:
             await cb.bot.send_message(user.tg_id, f"📦 Your order {order.order_number} status is now: {status}")
@@ -332,7 +341,6 @@ async def adm_order_set_status(cb: types.CallbackQuery):
             pass
 
     await cb.answer("Status updated")
-    # refresh view
     await adm_order_view(cb)
 
 # ---------- CSV export ----------
@@ -343,7 +351,6 @@ async def adm_export_csv(cb: types.CallbackQuery):
     async with SessionLocal() as db:
         orders = await repo.list_orders_last_days(db, 30)
 
-    # build CSV in memory
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["order_number", "created_at", "status", "user_tg_id", "user_name", "item_name", "qty", "price", "line_total", "order_total"])
@@ -361,7 +368,15 @@ async def adm_export_csv(cb: types.CallbackQuery):
                         it["name"], it["qty"], it["price"], it["qty"] * it["price"], float(o.total)
                     ])
 
-    csv_bytes = buf.getvalue().encode("utf-8-sig")  # BOM for Excel
+    csv_bytes = buf.getvalue().encode("utf-8-sig")
     file = BufferedInputFile(csv_bytes, filename="orders_last_30_days.csv")
     await cb.message.answer_document(document=file, caption="Orders export (last 30 days)")
+    await cb.answer()
+
+# ---------- back to admin home ----------
+@router.callback_query(F.data.in_(("adm:back", "adm:home")))
+async def adm_back(cb: types.CallbackQuery):
+    if not _is_admin(cb.from_user.id):
+        await cb.answer(); return
+    await cb.message.edit_text("Admin panel:", reply_markup=admin_menu_kb())
     await cb.answer()
