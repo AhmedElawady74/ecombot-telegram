@@ -51,32 +51,11 @@ It also provides an **admin panel** to manage products and orders directly insid
 
 ---
 
-## 📂 Project Structure
-
-
-
-app/
-├── bot/
-│ ├── handlers/ # User and Admin handlers
-│ ├── keyboards/ # Inline keyboard builders
-│ ├── states/ # FSM states
-│ └── main.py # Bot entry point
-├── core/
-│ └── config.py # Configurations (BOT_TOKEN, ADMIN_IDS, DB settings)
-├── db/
-│ ├── base.py # Async session maker
-│ ├── models.py # SQLAlchemy models
-│ └── repo.py # DB operations
-└── ecom.db # SQLite database (auto-created)
-
-
----
-
 ## ⚙️ Setup & Installation
 
 ### 1. Clone the repo
 ```bash
-git clone https://github.com/yourusername/ecombot.git
+git clone https://github.com/AhmedElawady74/ecombot-telegram
 cd ecombot
 
 2. Create virtual environment
@@ -156,3 +135,5 @@ Product stock management.
 
 Developed as a Telegram E-commerce Bot demo project.
 Feel free to fork, use, and improve!
+
+Made my @AElawadi74
