@@ -178,3 +178,4 @@ docker run -d --name ecombot ecombot
 
 Developed as a **Telegram E-commerce Bot demo project**.
 Feel free to fork, use, and improve!
+Made by @AElawadi74
